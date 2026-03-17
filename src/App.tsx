@@ -163,8 +163,36 @@ const LexalyseApp = () => {
   useEffect(() => {
     const loadNews = async () => {
       setIsNewsLoading(true);
+      
+      const CACHE_KEY = 'lexalyse_news_cache';
+      const CACHE_TIME_KEY = 'lexalyse_news_cache_time';
+      const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
+      try {
+        const cachedNews = localStorage.getItem(CACHE_KEY);
+        const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
+
+        if (cachedNews && cachedTime && (Date.now() - parseInt(cachedTime)) < CACHE_DURATION) {
+          setLegalNews(JSON.parse(cachedNews));
+          setIsNewsLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.warn("Failed to read news from cache", e);
+      }
+
       const news = await fetchLegalNews();
       setLegalNews(news);
+      
+      try {
+        if (news && news.length > 0) {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(news));
+          localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+        }
+      } catch (e) {
+        console.warn("Failed to save news to cache", e);
+      }
+      
       setIsNewsLoading(false);
     };
 

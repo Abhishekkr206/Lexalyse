@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 // ============================================================
 // MODEL CONFIGURATION — Change only this one constant
 // ============================================================
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
 
 export interface FileData {
   inlineData: {
@@ -310,6 +310,7 @@ export const generateCaseAnalysis = async (query: string) => {
       config: {
         systemInstruction: PROMPTS.CASE_ANALYSIS,
         tools: [{ googleSearch: {} }],
+        maxOutputTokens: 1500,
       },
     });
 
@@ -330,7 +331,7 @@ export const generateDeepCaseAnalysisStream = async (url: string, caseName: stri
       contents: prompt,
       config: {
         systemInstruction: PROMPTS.DEEP_CASE_ANALYSIS,
-        tools: [{ urlContext: {} }],
+        maxOutputTokens: 2500,
       },
     });
 
@@ -362,6 +363,7 @@ export const generateBareActTextStream = async (act: string, section: string, on
       config: {
         systemInstruction,
         tools: [{ googleSearch: {} }],
+        maxOutputTokens: 2000,
       },
     });
 
@@ -398,10 +400,10 @@ export const generateAcademicAnalysisStream = async (act: string, section: strin
 
     const response = await ai.models.generateContentStream({
       model: GEMINI_MODEL,
-      contents: `Please provide an academic analysis of ${act.toLowerCase().includes("constitution") ? "Article" : "Section"} ${section} of the ${act}. Use Google Search to verify the latest legal position.`,
+      contents: `Please provide an academic analysis of ${act.toLowerCase().includes("constitution") ? "Article" : "Section"} ${section} of the ${act}.`,
       config: {
         systemInstruction,
-        tools: [{ googleSearch: {} }],
+        maxOutputTokens: 1000,
       },
     });
 
@@ -429,6 +431,7 @@ export const generateMootAnalysisStream = async (side: string, argument: string,
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
+        maxOutputTokens: 1500,
         tools: [{ googleSearch: {} }],
       },
     });
@@ -457,7 +460,7 @@ export const generateStatutoryConversionStream = async (type: string, section: s
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
+        maxOutputTokens: 400,
       },
     });
 
@@ -508,6 +511,7 @@ export const generateResearchResponseStream = async (
       config: {
         systemInstruction: PROMPTS.RESEARCH,
         tools: [{ googleSearch: {} }],
+        maxOutputTokens: 2000,
       },
     });
 
@@ -535,7 +539,7 @@ export const generateMaximExplanationStream = async (maxim: string, onChunk: (te
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
+        maxOutputTokens: 400,
       },
     });
 
@@ -563,7 +567,7 @@ export const generateDoctrineExplanationStream = async (doctrine: string, onChun
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
+        maxOutputTokens: 250,
       },
     });
 
@@ -594,7 +598,7 @@ export const generateDraftStream = async (documentType: string, details: string,
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
+        maxOutputTokens: 2500,
       },
     });
 
