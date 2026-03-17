@@ -1026,7 +1026,7 @@ function Footer() {
 // ==========================================
 export default function LandingPage() {
   return (
-    <main className="min-h-screen bg-background text-foreground selection:bg-accent/30 selection:text-accent font-sans">
+    <main className="min-h-screen bg-background text-foreground selection:bg-accent/30 selection:text-accent font-sans max-w-[1360px] mx-auto">
       <Navbar />
       <HeroSection />
       <FeaturesSection />
