@@ -297,9 +297,9 @@ function HeroSection() {
       </div>
       
       <div className="container mx-auto px-4 md:px-6">
-        <div className="flex min-h-[100svh] flex-col lg:flex-row items-center justify-center pt-24 lg:pt-0 pb-12 lg:pb-0">
-          <div className="flex-1 z-10 flex flex-col items-center lg:items-start text-center lg:text-left w-full">
-            <div className="opacity-0 animate-fade-in-down" style={{ animationFillMode: 'forwards' }}>
+        <div className="flex min-h-screen flex-col lg:flex-row items-center py-24 lg:py-0">
+          <div className="flex-1 z-10 w-full text-center lg:text-left">
+            <div className="opacity-0 animate-fade-in-down flex justify-center lg:justify-start" style={{ animationFillMode: 'forwards' }}>
               <div className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-secondary/50 px-4 py-1.5 text-sm text-muted-foreground mb-6">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75"></span>
@@ -309,7 +309,7 @@ function HeroSection() {
               </div>
             </div>
             
-            <h1 className="text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold tracking-tight text-foreground text-balance opacity-0 animate-fade-in-up" style={{ animationDelay: '100ms', animationFillMode: 'forwards' }}>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold tracking-tight text-foreground text-balance opacity-0 animate-fade-in-up mx-auto lg:mx-0" style={{ animationDelay: '100ms', animationFillMode: 'forwards' }}>
               The Complete
               <br />
               <span className="bg-clip-text text-transparent bg-gradient-to-r from-foreground via-accent to-foreground animate-gradient bg-[length:200%_auto]">
@@ -323,7 +323,7 @@ function HeroSection() {
               Research smarter, draft faster, argue better.
             </p>
             
-            <div className="flex flex-col sm:flex-row gap-4 mt-8 opacity-0 animate-fade-in-up w-full sm:w-auto sm:justify-center lg:justify-start" style={{ animationDelay: '300ms', animationFillMode: 'forwards' }}>
+            <div className="flex flex-col sm:flex-row gap-4 mt-8 opacity-0 animate-fade-in-up w-full sm:w-auto justify-center lg:justify-start" style={{ animationDelay: '300ms', animationFillMode: 'forwards' }}>
               <Button size="lg" onClick={() => navigate('/app')} className="w-full sm:w-auto gap-2 group shadow-lg hover:shadow-accent/20">
                 Get Started
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
@@ -333,7 +333,7 @@ function HeroSection() {
               </Button>
             </div>
             
-            <div className="mt-12 flex flex-col sm:flex-row items-center gap-4 sm:gap-6 opacity-0 animate-fade-in-up" style={{ animationDelay: '400ms', animationFillMode: 'forwards' }}>
+            <div className="mt-12 flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 sm:gap-6 opacity-0 animate-fade-in-up" style={{ animationDelay: '400ms', animationFillMode: 'forwards' }}>
               <div className="flex -space-x-2">
                 {[1, 2, 3, 4, 5].map((i) => (
                   <div key={i} className="w-8 h-8 rounded-full bg-secondary border-2 border-background flex items-center justify-center text-xs font-medium text-muted-foreground">

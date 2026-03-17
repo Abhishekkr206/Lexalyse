@@ -1,18 +1,18 @@
 # Lexalyse - The Complete Legal AI Platform
 
-![Lexalyse Hero Section](/public/favicon.ico) *Lexalyse provides AI-powered analysis of 750+ bareacts, 50 years of precedents, and intelligent drafting assistance.*
+Lexalyse provides AI-powered analysis of 750+ bareacts, 50 years of precedents, and intelligent drafting assistance.\*
 
 Lexalyse is an innovative educational platform built for law students, legal researchers, and professionals. By leveraging large language models (Google Gemini API), Lexalyse transforms how users interact with dense legal texts.
 
 ## 🌟 Key Features
 
-*   **📖 Academic Section:** Simplified, plain-English analysis of over 750 Indian Bare Acts using AI-powered explanations.
-*   **⚖️ Precedent Repository:** A comprehensive and searchable collection of case summaries spanning 50 years of judicial decisions.
-*   **🏛️ District Court API Integration:** Look up specifics on District Court cases dynamically via real-time API queries.
-*   **📜 Legal Maxims & Doctrines:** Explore over 250 essential maxims and a complete database of legal doctrines with cases and applications.
-*   **🖋️ Argument Enhancer:** AI-assisted tool designed to improve, structure, and strengthen formal legal arguments.
-*   **📝 DraftDash:** An intelligent drafting assistant to generate petitions, applications, plaints, and written statements for various court levels.
-*   **📰 Live Legal News:** Stay up to date with automated feeds fetching the latest headlines from legal news portals.
+- **📖 Academic Section:** Simplified, plain-English analysis of over 750 Indian Bare Acts using AI-powered explanations.
+- **⚖️ Precedent Repository:** A comprehensive and searchable collection of case summaries spanning 50 years of judicial decisions.
+- **🏛️ District Court API Integration:** Look up specifics on District Court cases dynamically via real-time API queries.
+- **📜 Legal Maxims & Doctrines:** Explore over 250 essential maxims and a complete database of legal doctrines with cases and applications.
+- **🖋️ Argument Enhancer:** AI-assisted tool designed to improve, structure, and strengthen formal legal arguments.
+- **📝 DraftDash:** An intelligent drafting assistant to generate petitions, applications, plaints, and written statements for various court levels.
+- **📰 Live Legal News:** Stay up to date with automated feeds fetching the latest headlines from legal news portals.
 
 ## 🚀 Tech Stack
 
@@ -30,37 +30,47 @@ Lexalyse is an innovative educational platform built for law students, legal res
 To run Lexalyse locally, follow these steps:
 
 ### 1. Clone the Repository
+
 ```bash
 git clone https://github.com/Abhishekkr206/Lexalyse.git
 cd Lexalyse
 ```
 
 ### 2. Install Dependencies
+
 Make sure you have Node.js installed on your machine.
+
 ```bash
 npm install
 ```
 
 ### 3. Setup Environment Variables
+
 Create a `.env` file in the root directory (where `package.json` is located) and add your Google Gemini API key:
+
 ```env
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 ```
-*(Note: Lexalyse relies on the Gemini API for bare act simplicity, case summaries, drafting, and real-time research. To use those features locally, you need an active API key).*
+
+_(Note: Lexalyse relies on the Gemini API for bare act simplicity, case summaries, drafting, and real-time research. To use those features locally, you need an active API key)._
 
 ### 4. Run the Development Server
+
 ```bash
 npm run dev
 ```
-By default, the Vite dev server will start at `http://localhost:3000`. 
+
+By default, the Vite dev server will start at `http://localhost:3000`.
 Lexalyse uses React Router, and the `LandingPage` will serve on `/` while the main legal intelligence application interface is hosted on `/app`.
 
 ## 📦 Building for Production
 
 To create an optimized production build:
+
 ```bash
 npm run build
 ```
+
 The compiled assets will be placed in the `dist` directory. You can preview the production build locally using `npm run preview`.
 
 ## ⚠️ Disclaimer
