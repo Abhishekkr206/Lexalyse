@@ -1,4 +1,4 @@
-const key = "AIzaSyBQVpB7ADWzxrDOBAKhxXeRpZWOJaai__s";
+const key = "[ENCRYPTION_KEY]";
 
 fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`)
   .then(res => res.json())
