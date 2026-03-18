@@ -11,12 +11,10 @@ import {
   generateMootAnalysisStream, 
   generateStatutoryConversionStream, 
   generateResearchResponseStream, 
-  generateBareActTextStream, 
   generateCaseAnalysis, 
   generateMaximExplanationStream, 
   generateDoctrineExplanationStream, 
-  generateDraftStream, 
-  fetchLegalNews 
+  generateDraftStream
 } from './services/gemini';
 import LandingPage from './components/LandingPage';
 
@@ -123,7 +121,6 @@ const LexalyseApp = () => {
 
   // Gemini Integration States
   const [academicAnalysis, setAcademicAnalysis] = useState<string | null>(null);
-  const [bareActText, setBareActText] = useState<string | null>(null);
   const [sectionSearchQuery, setSectionSearchQuery] = useState('');
   const [isAcademicLoading, setIsAcademicLoading] = useState(false);
   
@@ -155,53 +152,6 @@ const LexalyseApp = () => {
   const isDarkMode = true;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
-
-  // News State
-  const [legalNews, setLegalNews] = useState<{headline: string, source: string, url: string}[]>([]);
-  const [isNewsLoading, setIsNewsLoading] = useState(false);
-
-  useEffect(() => {
-    const loadNews = async () => {
-      setIsNewsLoading(true);
-      
-      const CACHE_KEY = 'lexalyse_news_cache';
-      const CACHE_TIME_KEY = 'lexalyse_news_cache_time';
-      const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-
-      try {
-        const cachedNews = localStorage.getItem(CACHE_KEY);
-        const cachedTime = localStorage.getItem(CACHE_TIME_KEY);
-
-        if (cachedNews && cachedTime && (Date.now() - parseInt(cachedTime)) < CACHE_DURATION) {
-          setLegalNews(JSON.parse(cachedNews));
-          setIsNewsLoading(false);
-          return;
-        }
-      } catch (e) {
-        console.warn("Failed to read news from cache", e);
-      }
-
-      const news = await fetchLegalNews();
-      setLegalNews(news);
-      
-      try {
-        if (news && news.length > 0) {
-          localStorage.setItem(CACHE_KEY, JSON.stringify(news));
-          localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
-        }
-      } catch (e) {
-        console.warn("Failed to save news to cache", e);
-      }
-      
-      setIsNewsLoading(false);
-    };
-
-    loadNews();
-    
-    // Update every 6 hours (6 * 60 * 60 * 1000 ms)
-    const interval = setInterval(loadNews, 6 * 60 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Auto-switch theme based on active tab removed
 
@@ -310,6 +260,11 @@ const LexalyseApp = () => {
         chatMessages.map(m => ({ role: m.role, text: m.text })),
         userMsg,
         (chunk) => {
+          if (chunk.includes("QUOTA_EXCEEDED")) {
+            toast.error("API Quota Exceeded", {
+              description: "You've reached the Gemini API free tier limit. Please wait a minute or check your quota."
+            });
+          }
           setChatMessages(prev => {
             const newMessages = [...prev];
             newMessages[newMessages.length - 1].text = chunk;
@@ -366,8 +321,8 @@ const LexalyseApp = () => {
     const query = sectionSearchQuery.trim() || "General Overview";
     
     setIsAcademicLoading(true);
+    setAcademicAnalysis("");
     
-    // Fetch both original text and analysis in parallel
     const actNameWithYear = selectedAct.year && selectedAct.year !== 'Various' && selectedAct.year !== 'Common Law'
       ? `${selectedAct.title} (${selectedAct.year})` 
       : selectedAct.title;
@@ -376,14 +331,8 @@ const LexalyseApp = () => {
       ? `${selectedAct.fullName} (${selectedAct.year})`
       : (selectedAct.description ? `${actNameWithYear} (Full Name: ${selectedAct.description})` : actNameWithYear);
 
-    setBareActText("");
-    setAcademicAnalysis("");
-    
-    // Fetch both original text and analysis in parallel with streaming
-    await Promise.all([
-      generateBareActTextStream(fullActContext, query, (chunk) => setBareActText(chunk)),
-      generateAcademicAnalysisStream(fullActContext, query, (chunk) => setAcademicAnalysis(chunk))
-    ]);
+    // Only fetch analysis by default to save API quota
+    await generateAcademicAnalysisStream(fullActContext, query, (chunk) => setAcademicAnalysis(chunk));
     
     setIsAcademicLoading(false);
   };
@@ -1282,7 +1231,6 @@ const LexalyseApp = () => {
 
   const handleActSelect = (act: Act) => {
     setSelectedAct(act);
-    setBareActText(null);
     setAcademicAnalysis(null);
     setSectionSearchQuery('');
   };
@@ -1431,65 +1379,6 @@ const LexalyseApp = () => {
                   Bridging the gap between traditional legal research and modern AI intelligence, we provide the clarity needed to master the law.
                 </motion.p>
 
-                {/* LIVE NEWS TICKER */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.8 }}
-                  className="w-full max-w-3xl mx-auto overflow-hidden bg-card/50 backdrop-blur-md border border-border rounded-3xl p-4 md:p-8 shadow-2xl"
-                >
-                  <div className="flex items-center justify-between gap-3 mb-6">
-                    <div className="flex items-center gap-2 px-3 py-1 bg-destructive rounded-full text-[10px] font-bold uppercase tracking-widest text-destructive-foreground animate-pulse">
-                      <div className="w-1.5 h-1.5 bg-current rounded-full" />
-                      Live Updates
-                    </div>
-                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">Legal Intelligence Network</span>
-                  </div>
-
-                  <div className="space-y-4 text-left">
-                    {isNewsLoading ? (
-                      <div className="space-y-3">
-                        <div className="h-4 bg-white/5 rounded animate-pulse w-3/4" />
-                        <div className="h-4 bg-white/5 rounded animate-pulse w-1/2" />
-                      </div>
-                    ) : (
-                      legalNews.map((news, idx) => (
-                        <motion.div 
-                          key={idx}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: 1 + (idx * 0.1) }}
-                          className="flex items-start gap-4 group"
-                        >
-                          <span className="text-muted-foreground font-serif italic text-lg mt-0.5">0{idx + 1}</span>
-                          <div className="flex-1">
-                            <a 
-                              href={news.url.startsWith('http') ? news.url : `https://www.barandbench.com${news.url.startsWith('/') ? '' : '/'}${news.url}`} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="text-foreground/90 text-sm md:text-base font-medium leading-snug hover:text-primary transition-colors block"
-                            >
-                              {news.headline}
-                            </a>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">Source: {news.source}</span>
-                              {news.url !== '#' && (
-                                <a 
-                                  href={news.url.startsWith('http') ? news.url : `https://www.barandbench.com${news.url.startsWith('/') ? '' : '/'}${news.url}`} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="text-[10px] uppercase tracking-widest text-primary font-bold hover:underline flex items-center gap-1"
-                                >
-                                  Read Full Article <ChevronRight size={10} />
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))
-                    )}
-                  </div>
-                </motion.div>
               </div>
             </motion.div>
           )}
@@ -1788,53 +1677,18 @@ Ratio Decidendi: ${caseResult.ratioDecidendi}
                     </div>
                   </div>
 
-                  <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 rounded-[2rem] overflow-hidden shadow-2xl border border-border">
-                    {/* LEFT: ORIGINAL TEXT */}
-                    <div className="bg-card text-muted-foreground p-8 overflow-y-auto border-b lg:border-b-0 lg:border-r border-border relative">
+                  <div className="flex-1 flex flex-col rounded-[2rem] overflow-hidden shadow-2xl border border-border bg-card">
+                    {/* SIMPLIFIED TEXT ONLY */}
+                    <div className="flex-1 p-8 md:p-12 overflow-y-auto transition-colors relative">
                       <div className="flex items-center justify-between mb-8">
-                        <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">Original Bare Act Text</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] uppercase tracking-widest text-primary font-bold">Simplified Analysis (AI)</span>
+                          <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full border border-destructive/20 uppercase tracking-widest">Advanced AI</span>
+                        </div>
                         <div className="flex items-center gap-3">
                           <span className="text-[10px] font-bold text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20">
                             {sectionSearchQuery ? `${selectedAct.title === 'Constitution' ? 'Art.' : 'Sec.'} ${sectionSearchQuery}` : `Select ${selectedAct.title === 'Constitution' ? 'Article' : 'Section'}`}
                           </span>
-                          {bareActText && (
-                            <button 
-                              onClick={() => {
-                                navigator.clipboard.writeText(bareActText);
-                                toast.success("Original text copied");
-                              }}
-                              className="p-1.5 hover:bg-secondary rounded-lg transition-all text-muted-foreground hover:text-foreground"
-                              title="Copy original text"
-                            >
-                              <Copy size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {bareActText ? (
-                        <div className="prose prose-invert max-w-none leading-relaxed font-mono text-sm text-foreground/80">
-                          <ReactMarkdown>{bareActText}</ReactMarkdown>
-                          {isAcademicLoading && <span className="inline-block w-1.5 h-4 ml-1 bg-primary animate-pulse align-middle" />}
-                        </div>
-                      ) : isAcademicLoading ? (
-                        <div className="flex flex-col items-center justify-center h-40 space-y-4">
-                          <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                          <p className="text-sm text-muted-foreground">Fetching original text...</p>
-                        </div>
-                      ) : (
-                        <p className="leading-relaxed font-mono text-sm text-muted-foreground/50 italic">
-                          Search for {selectedAct.title === 'Constitution' ? 'an article' : 'a section'} to view its original text here.
-                        </p>
-                      )}
-                    </div>
-
-                    {/* RIGHT: SIMPLIFIED TEXT */}
-                    <div className="bg-secondary/20 p-8 overflow-y-auto transition-colors relative">
-                      <div className="flex items-center justify-between mb-8">
-                        <span className="text-[10px] uppercase tracking-widest text-primary font-bold">Simplified Analysis (AI)</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-3 py-1 rounded-full border border-destructive/20 uppercase tracking-widest">Advanced AI</span>
                           {academicAnalysis && (
                             <button 
                               onClick={() => {
@@ -1851,23 +1705,23 @@ Ratio Decidendi: ${caseResult.ratioDecidendi}
                       </div>
                       
                       {academicAnalysis ? (
-                        <div className="markdown-body">
+                        <div className="markdown-body max-w-4xl mx-auto">
                           <ReactMarkdown>{academicAnalysis}</ReactMarkdown>
                           {isAcademicLoading && <span className="inline-block w-1.5 h-4 ml-1 bg-primary animate-pulse align-middle" />}
                         </div>
                       ) : isAcademicLoading ? (
-                        <div className="flex flex-col items-center justify-center h-40 space-y-4">
-                          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <div className="flex flex-col items-center justify-center h-64 space-y-4">
+                          <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
                           <p className="text-sm text-muted-foreground">Analyzing {selectedAct.title === 'Constitution' ? 'article' : 'section'}...</p>
                         </div>
                       ) : (
-                        <div className="text-center py-12">
-                          <div className="w-16 h-16 bg-secondary rounded-2xl flex items-center justify-center mb-6 mx-auto border border-border">
-                            <Sparkles size={32} className="text-muted-foreground/30" />
+                        <div className="text-center py-20">
+                          <div className="w-20 h-20 bg-secondary rounded-3xl flex items-center justify-center mb-8 mx-auto border border-border">
+                            <Sparkles size={40} className="text-muted-foreground/30" />
                           </div>
-                          <h3 className="text-xl font-serif font-bold mb-3 text-foreground">What this actually means:</h3>
-                          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                            Enter {selectedAct.title === 'Constitution' ? 'an article' : 'a section'} number above and click "Go" to generate a simplified explanation using AI.
+                          <h3 className="text-2xl font-serif font-bold mb-4 text-foreground">What this actually means:</h3>
+                          <p className="text-muted-foreground max-w-md mx-auto leading-relaxed">
+                            Enter {selectedAct.title === 'Constitution' ? 'an article' : 'a section'} number above and click "Go" to generate a simplified, student-friendly explanation using AI.
                           </p>
                         </div>
                       )}

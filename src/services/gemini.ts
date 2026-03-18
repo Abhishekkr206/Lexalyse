@@ -254,20 +254,6 @@ Tone: Academic yet accessible; professional but not archaic.
 Length: Maximum 150 words.
 Formatting: Use bolding for the case name and the core legal principle.`,
 
-  NEWS: `Role: You are a Legal News Curator for Lexalyse. Your task is to provide 3 highly relevant, recent, and impactful legal news headlines from India, specifically sourcing from Bar & Bench (barandbench.com).
-  
-  Current Date: {date}
-  
-  Instructions:
-  1. Use Google Search to find the 3 most recent articles from barandbench.com/latest-legal-news.
-  2. Ensure the 'url' provided is the EXACT, direct link to the full article on Bar & Bench.
-  3. Do NOT hallucinate or guess URLs. If a direct URL is not found, use 'https://www.barandbench.com/latest-legal-news'.
-  
-  Output Format: Return a JSON array of 3 objects, each with 'headline', 'source', and 'url' fields.
-  Example: [{"headline": "SC stays implementation of new IT rules", "source": "Bar & Bench", "url": "https://www.barandbench.com/news/sc-stays-it-rules"}]
-  
-  Strictly return ONLY the JSON array.`,
-
   DRAFTING: `Role: You are a Senior Legal Counsel and Professional Draftsman with 20+ years of experience in the High Courts and Supreme Court of India. You are known for "Concise Brilliance" and "Zero-Error" drafting.
 Objective: Draft a {documentType} based on the following Facts: {details}.
 Core Directives for Accuracy:
@@ -315,8 +301,11 @@ export const generateCaseAnalysis = async (query: string) => {
     });
 
     return response.text;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Case Analysis Error:", error);
+    if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
+      return JSON.stringify({ caseName: 'QUOTA_EXCEEDED', citation: '', year: '', bench: '', tags: [], facts: 'API quota exceeded. Please wait a minute and try again.', coreIssues: '', arguments: '', judgement: '', holding: '', ratioDecidendi: '', status: '', primarySourceUrl: '' });
+    }
     return null;
   }
 };
@@ -342,9 +331,16 @@ export const generateDeepCaseAnalysisStream = async (url: string, caseName: stri
       onChunk(fullText);
     }
     return fullText;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Deep Case Analysis Stream Error:", error);
-    return null;
+    if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
+      const errorMsg = "QUOTA_EXCEEDED: You've reached the API free tier limit. Please wait a minute and try again.";
+      onChunk(errorMsg);
+      return errorMsg;
+    }
+    const errorMsg = "Unable to perform deep analysis. Please check your API key and connection.";
+    onChunk(errorMsg);
+    return errorMsg;
   }
 };
 
@@ -614,46 +610,5 @@ export const generateDraftStream = async (documentType: string, details: string,
     const errorMsg = "Unable to generate draft. Please check your API key and connection.";
     onChunk(errorMsg);
     return errorMsg;
-  }
-};
-
-export const fetchLegalNews = async () => {
-  try {
-    const ai = getAiClient();
-    const date = new Date().toISOString().split("T")[0];
-    const prompt = PROMPTS.NEWS.replace("{date}", date);
-
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        tools: [{ googleSearch: {} }],
-      },
-    });
-
-    const raw = response.text || "[]";
-    // Strip markdown fences if model wraps JSON
-    const clean = raw.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
-  } catch (error) {
-    console.error("News Fetch Error:", error);
-    return [
-      {
-        headline: "Supreme Court emphasizes judicial restraint in policy matters",
-        source: "Bar & Bench",
-        url: "https://www.barandbench.com/",
-      },
-      {
-        headline: "New amendments proposed for environmental protection laws",
-        source: "Bar & Bench",
-        url: "https://www.barandbench.com/",
-      },
-      {
-        headline: "High Court rules on digital privacy in employment contracts",
-        source: "Bar & Bench",
-        url: "https://www.barandbench.com/news/litigation/supreme-court-directs-cbi-to-conduct-preliminary-inquiry-into-deaths-of-3-dalits-in-mp/",
-      },
-    ];
   }
 };
