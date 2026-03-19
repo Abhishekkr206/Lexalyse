@@ -59,7 +59,7 @@ The user will provide: [Bare Act Name] + [Section Number].
   4. **The "Senior's Touch"**: Rewrite one key paragraph of the user's argument using high-level legal rhetoric, sophisticated vocabulary, and a persuasive judicial tone.
 
   MANDATORY SOURCES & ACCURACY
-  You MUST cross-reference all case law via Google Search to ensure they are not overruled.
+  You MUST cross-reference all case law to ensure they are not overruled.
   Use primary sites: Indian Kanoon, SCC Online, LiveLaw, and official Court websites.
   If a case name is ambiguous, ask for clarification before proceeding.
 
@@ -272,16 +272,25 @@ Final Review Step: Scan the final draft for:
 };
 
 // ============================================================
-// AI CLIENT
+// AI CLIENT (singleton — avoids recreating on every call)
 // ============================================================
+let _aiClient: GoogleGenAI | null = null;
 const getAiClient = () => {
+  if (_aiClient) return _aiClient;
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.error("GEMINI_API_KEY is missing");
     throw new Error("Gemini API Key is missing");
   }
-  return new GoogleGenAI({ apiKey });
+  _aiClient = new GoogleGenAI({ apiKey });
+  return _aiClient;
 };
+
+// ============================================================
+// SIMPLE RESPONSE CACHE (saves quota on repeated queries)
+// ============================================================
+const responseCache = new Map<string, string>();
+const getCacheKey = (...parts: string[]) => parts.join('||');
 
 // ============================================================
 // SERVICE FUNCTIONS
@@ -320,7 +329,7 @@ export const generateDeepCaseAnalysisStream = async (url: string, caseName: stri
       contents: prompt,
       config: {
         systemInstruction: PROMPTS.DEEP_CASE_ANALYSIS,
-        maxOutputTokens: 2500,
+        maxOutputTokens: 1500,
       },
     });
 
@@ -345,6 +354,14 @@ export const generateDeepCaseAnalysisStream = async (url: string, caseName: stri
 };
 
 export const generateBareActTextStream = async (act: string, section: string, onChunk: (text: string) => void) => {
+  // Check cache first
+  const cacheKey = getCacheKey('bareact', act, section);
+  const cached = responseCache.get(cacheKey);
+  if (cached) {
+    onChunk(cached);
+    return cached;
+  }
+
   try {
     const ai = getAiClient();
     let systemInstruction = PROMPTS.BARE_ACT;
@@ -376,6 +393,7 @@ export const generateBareActTextStream = async (act: string, section: string, on
       return errorMsg;
     }
 
+    responseCache.set(cacheKey, fullText);
     return fullText;
   } catch (error) {
     console.error("Bare Act Text Stream Error:", error);
@@ -386,6 +404,14 @@ export const generateBareActTextStream = async (act: string, section: string, on
 };
 
 export const generateAcademicAnalysisStream = async (act: string, section: string, onChunk: (text: string) => void) => {
+  // Check cache first
+  const cacheKey = getCacheKey('academic', act, section);
+  const cached = responseCache.get(cacheKey);
+  if (cached) {
+    onChunk(cached);
+    return cached;
+  }
+
   try {
     const ai = getAiClient();
     let systemInstruction = PROMPTS.ACADEMIC;
@@ -409,6 +435,7 @@ export const generateAcademicAnalysisStream = async (act: string, section: strin
       fullText += text;
       onChunk(fullText);
     }
+    responseCache.set(cacheKey, fullText);
     return fullText;
   } catch (error) {
     console.error("Academic Analysis Stream Error:", error);
@@ -428,7 +455,6 @@ export const generateMootAnalysisStream = async (side: string, argument: string,
       contents: prompt,
       config: {
         maxOutputTokens: 1500,
-        tools: [{ googleSearch: {} }],
       },
     });
 
@@ -448,6 +474,14 @@ export const generateMootAnalysisStream = async (side: string, argument: string,
 };
 
 export const generateStatutoryConversionStream = async (type: string, section: string, onChunk: (text: string) => void) => {
+  // Check cache first
+  const cacheKey = getCacheKey('bridge', type, section);
+  const cached = responseCache.get(cacheKey);
+  if (cached) {
+    onChunk(cached);
+    return cached;
+  }
+
   try {
     const ai = getAiClient();
     const prompt = PROMPTS.BRIDGE.replace("{type}", type).replace("{section}", section);
@@ -466,6 +500,7 @@ export const generateStatutoryConversionStream = async (type: string, section: s
       fullText += text;
       onChunk(fullText);
     }
+    responseCache.set(cacheKey, fullText);
     return fullText;
   } catch (error) {
     console.error("Statutory Bridge Stream Error:", error);
@@ -484,7 +519,9 @@ export const generateResearchResponseStream = async (
   try {
     const ai = getAiClient();
 
-    const contents = history.map((h) => ({
+    // Cap history to last 6 messages to avoid ballooning input tokens
+    const recentHistory = history.slice(-6);
+    const contents = recentHistory.map((h) => ({
       role: h.role,
       parts: [{ text: h.text }],
     }));
@@ -507,7 +544,7 @@ export const generateResearchResponseStream = async (
       config: {
         systemInstruction: PROMPTS.RESEARCH,
         tools: [{ googleSearch: {} }],
-        maxOutputTokens: 2000,
+        maxOutputTokens: 1200,
       },
     });
 
@@ -594,7 +631,7 @@ export const generateDraftStream = async (documentType: string, details: string,
       model: GEMINI_MODEL,
       contents: prompt,
       config: {
-        maxOutputTokens: 2500,
+        maxOutputTokens: 1500,
       },
     });
 

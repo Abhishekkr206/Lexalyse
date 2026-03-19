@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Search, Scale, BookOpen, Gavel, ScrollText, LayoutDashboard, Upload, ChevronRight, Book, ArrowRight, ArrowLeft, AlertTriangle, ArrowLeftRight, Sparkles, Send, Bot, FileText, Users, Calendar, CheckCircle, XCircle, ShieldAlert, X, Menu, BrainCircuit, Plus, Paperclip, ChevronDown, Mic, Quote, Copy } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "./lib/utils";
 import { Toaster, toast } from "sonner";
@@ -148,6 +147,14 @@ const LexalyseApp = () => {
   const [draftResult, setDraftResult] = useState<string | null>(null);
   const [isDraftLoading, setIsDraftLoading] = useState(false);
 
+  // Advanced Arguments State
+  const [argumentAnalysis, setArgumentAnalysis] = useState('');
+  const [isArgumentLoading, setIsArgumentLoading] = useState(false);
+  
+  // Rate Limiting State
+  const [lastApiCallTime, setLastApiCallTime] = useState(0);
+  const API_COOLDOWN_MS = 3000; // 3 second cooldown between any AI requests
+
   // Theme State
   const isDarkMode = true;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -217,18 +224,93 @@ const LexalyseApp = () => {
     setRepoSearch(example.caseName);
   };
 
+  // Helper: detect quota/key errors in streamed text responses
+  const checkResponseForErrors = (text: string): boolean => {
+    if (!text) return false;
+    if (text.includes('QUOTA_EXCEEDED') || text.includes('RESOURCE_EXHAUSTED') || text.includes('429')) {
+      toast.error('AI Requests Exhausted', {
+        description: 'You\'ve used up your free AI requests for now. Wait a few minutes and try again.',
+        duration: 6000,
+      });
+      return true;
+    }
+    if (text.includes('API Key is missing') || text.includes('API key')) {
+      toast.error('AI Service Down', {
+        description: 'Our AI service is temporarily unavailable. We\'re working on it — please try again later.',
+        duration: 8000,
+      });
+      return true;
+    }
+    if (text.includes('Unable to') || text.includes('error') && text.length < 100) {
+      toast.error('Something Went Wrong', {
+        description: 'Couldn\'t get a response. Check your internet connection and try again.',
+        duration: 5000,
+      });
+      return true;
+    }
+    return false;
+  };
+
+  // Helper: Global rate limiter to prevent spam clicking
+  const checkRateLimit = (): boolean => {
+    const now = Date.now();
+    if (now - lastApiCallTime < API_COOLDOWN_MS) {
+      toast.error('Please Wait', {
+        description: 'You are requesting too fast. Please wait a few seconds before your next AI request.',
+        duration: 3000,
+      });
+      return false; // Not allowed
+    }
+    setLastApiCallTime(now);
+    return true; // Allowed
+  };
+
   const handleCaseSearch = async () => {
-    if (!repoSearch.trim()) return;
+    if (!repoSearch.trim() || isRepoLoading) return;
+    if (!checkRateLimit()) return;
     setIsRepoLoading(true);
     setCaseResult(null);
     
-    const result = await generateCaseAnalysis(repoSearch);
-    if (result) {
-      try {
-        const parsed = JSON.parse(result);
-        setCaseResult(parsed);
-      } catch (e) {
-        console.error("Failed to parse case analysis JSON", e);
+    try {
+      const result = await generateCaseAnalysis(repoSearch);
+      if (result) {
+        try {
+          // Strip markdown code blocks if Gemini wraps JSON in ```json ... ```
+          const cleanJson = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+          const parsed = JSON.parse(cleanJson);
+          if (parsed.caseName === 'QUOTA_EXCEEDED') {
+            toast.error('AI Requests Exhausted', {
+              description: 'You\'ve used up your free AI requests for now. Wait a few minutes and try again.',
+              duration: 6000,
+            });
+          } else {
+            setCaseResult(parsed);
+          }
+        } catch (e) {
+          console.error("Failed to parse case analysis JSON", e);
+          toast.error('Couldn\'t Load Case', {
+            description: 'We had trouble reading the case data. Please try your search again.',
+            duration: 5000,
+          });
+        }
+      } else {
+        toast.error('No Results Found', {
+          description: 'We couldn\'t find that case. Try searching with a different name or citation.',
+          duration: 4000,
+        });
+      }
+    } catch (error: any) {
+      console.error("Case Search Error:", error);
+      if (error?.message?.includes('API Key is missing')) {
+        toast.error('AI Service Down', {
+          description: 'Our AI service is temporarily unavailable. We\'re working on it — please try again later.',
+          duration: 8000,
+        });
+      } else {
+        toast.error('Search Failed', {
+          description: 'We couldn\'t complete your search. Please check your internet and try again.',
+          duration: 5000,
+        });
       }
     }
     setIsRepoLoading(false);
@@ -236,6 +318,7 @@ const LexalyseApp = () => {
 
   const handleChatSubmit = async () => {
     if ((!chatInput.trim() && chatFiles.length === 0) || isAiLoading) return;
+    if (!checkRateLimit()) return;
     
     const userMsg = chatInput;
     const currentFiles = [...chatFiles];
@@ -261,8 +344,8 @@ const LexalyseApp = () => {
         userMsg,
         (chunk) => {
           if (chunk.includes("QUOTA_EXCEEDED")) {
-            toast.error("API Quota Exceeded", {
-              description: "You've reached the Gemini API free tier limit. Please wait a minute or check your quota."
+            toast.error("AI Requests Exhausted", {
+              description: "You've used up your free AI requests for now. Wait a few minutes and try again."
             });
           }
           setChatMessages(prev => {
@@ -275,13 +358,13 @@ const LexalyseApp = () => {
       );
     } catch (error) {
       console.error("AI Error:", error);
-      toast.error("AI Research Error", {
-        description: "I encountered an error connecting to the legal database. Please check your connection or API key."
+      toast.error("Something Went Wrong", {
+        description: "We couldn't get a response right now. Please check your internet and try again."
       });
       setChatMessages(prev => {
         const newMessages = [...prev];
         if (newMessages[newMessages.length - 1].role === 'model' && !newMessages[newMessages.length - 1].text) {
-          newMessages[newMessages.length - 1].text = "Error: Failed to generate response.";
+          newMessages[newMessages.length - 1].text = "Sorry, I couldn't process your request. Please try again.";
         }
         return newMessages;
       });
@@ -318,6 +401,7 @@ const LexalyseApp = () => {
 
   const handleAcademicAnalysis = async () => {
     if (!selectedAct) return;
+    if (!checkRateLimit()) return;
     const query = sectionSearchQuery.trim() || "General Overview";
     
     setIsAcademicLoading(true);
@@ -332,30 +416,35 @@ const LexalyseApp = () => {
       : (selectedAct.description ? `${actNameWithYear} (Full Name: ${selectedAct.description})` : actNameWithYear);
 
     // Only fetch analysis by default to save API quota
-    await generateAcademicAnalysisStream(fullActContext, query, (chunk) => setAcademicAnalysis(chunk));
+    const result = await generateAcademicAnalysisStream(fullActContext, query, (chunk) => setAcademicAnalysis(chunk));
+    if (result) checkResponseForErrors(result);
     
     setIsAcademicLoading(false);
   };
 
   const handleMootAnalysis = async () => {
-    if (!mootArgument.trim()) return;
+    if (!mootArgument.trim() || isMootLoading) return;
+    if (!checkRateLimit()) return;
     setIsMootLoading(true);
     setMootAnalysis("");
-    await generateMootAnalysisStream(mootSide, mootArgument, (chunk) => setMootAnalysis(chunk));
+    const result = await generateMootAnalysisStream(mootSide, mootArgument, (chunk) => setMootAnalysis(chunk));
+    if (result) checkResponseForErrors(result);
     setIsMootLoading(false);
   };
 
   const handleBridgeConversion = async () => {
-    if (!bridgeSection.trim()) return;
+    if (!bridgeSection.trim() || isBridgeLoading) return;
+    if (!checkRateLimit()) return;
     setIsBridgeLoading(true);
     setBridgeResult("");
-    await generateStatutoryConversionStream(bridgeConversionType, bridgeSection, (chunk) => setBridgeResult(chunk));
+    const result = await generateStatutoryConversionStream(bridgeConversionType, bridgeSection, (chunk) => setBridgeResult(chunk));
+    if (result) checkResponseForErrors(result);
     setIsBridgeLoading(false);
   };
 
   const handleMaximSearch = async (maxim?: string) => {
     const query = maxim || maximSearch;
-    if (!query.trim()) return;
+    if (!query.trim() || isMaximLoading) return;
     
     setIsMaximLoading(true);
     setMaximResult(null);
@@ -370,26 +459,48 @@ const LexalyseApp = () => {
     }
     
     // Fallback to Gemini for other maxims
+    if (!checkRateLimit()) {
+      setIsMaximLoading(false);
+      return;
+    }
     setMaximResult("");
-    await generateMaximExplanationStream(query, (chunk) => setMaximResult(chunk));
+    const result = await generateMaximExplanationStream(query, (chunk) => setMaximResult(chunk));
+    if (result) checkResponseForErrors(result);
     setIsMaximLoading(false);
   };
 
   const handleDoctrineAnalysis = async (doctrine: string) => {
+    if (isDoctrineLoading) return;
     setIsDoctrineLoading(true);
     setSelectedDoctrine(doctrine);
     setDoctrineResult("");
     
-    await generateDoctrineExplanationStream(doctrine, (chunk) => setDoctrineResult(chunk));
+    // Serve locally first to save API quota
+    const provided = PROVIDED_DOCTRINES.find(d => d.term.toLowerCase() === doctrine.toLowerCase());
+    if (provided) {
+      setDoctrineResult(`### ${provided.term}\n\n${provided.definition}`);
+      setIsDoctrineLoading(false);
+      return;
+    }
+    
+    // Fallback to Gemini for unknown doctrines
+    if (!checkRateLimit()) {
+      setIsDoctrineLoading(false);
+      return;
+    }
+    const result = await generateDoctrineExplanationStream(doctrine, (chunk) => setDoctrineResult(chunk));
+    if (result) checkResponseForErrors(result);
     setIsDoctrineLoading(false);
   };
 
   const handleDraftGeneration = async () => {
-    if (!draftDetails.trim()) return;
+    if (!draftDetails.trim() || isDraftLoading) return;
+    if (!checkRateLimit()) return;
     setIsDraftLoading(true);
     setDraftResult("");
     const finalType = draftType === 'Other / Custom' ? customDraftType : draftType;
-    await generateDraftStream(finalType || 'Legal Document', draftDetails, (chunk) => setDraftResult(chunk));
+    const result = await generateDraftStream(finalType || 'Legal Document', draftDetails, (chunk) => setDraftResult(chunk));
+    if (result) checkResponseForErrors(result);
     setIsDraftLoading(false);
   };
 
