@@ -17,11 +17,6 @@ import {
 } from './services/gemini';
 import LandingPage from './components/LandingPage';
 
-/**
- * LEXALYSE - PROFESSIONAL INTERFACE
- * Primary Palette: Matte Black (#1A1A1A), Light Grey (#F5F5F7)
- * Font: INTER
- */
 
 interface Act {
   id: string;
