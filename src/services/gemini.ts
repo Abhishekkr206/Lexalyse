@@ -1,5 +1,27 @@
 import { GoogleGenAI } from "@google/genai";
 
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  let urlStr = '';
+  if (typeof input === 'string') urlStr = input;
+  else if (input instanceof URL) urlStr = input.toString();
+  else if (input instanceof Request) urlStr = input.url;
+
+  if (urlStr.includes('generativelanguage.googleapis.com')) {
+    const urlObj = new URL(urlStr);
+    return originalFetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path: urlObj.pathname,
+        method: init?.method || (input instanceof Request ? input.method : 'POST'),
+        body: init?.body
+      })
+    });
+  }
+  return originalFetch(input, init);
+};
+
 // ============================================================
 // MODEL CONFIGURATION — Change only this one constant
 // ============================================================
@@ -329,12 +351,7 @@ Before outputting, verify:
 let _aiClient: GoogleGenAI | null = null;
 const getAiClient = () => {
   if (_aiClient) return _aiClient;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error("GEMINI_API_KEY is missing");
-    throw new Error("Gemini API Key is missing");
-  }
-  _aiClient = new GoogleGenAI({ apiKey });
+  _aiClient = new GoogleGenAI({ apiKey: 'proxy_key_via_api' }); // Fake key, Vercel backend injects real one
   return _aiClient;
 };
 

@@ -2,18 +2,7 @@ import { supabase } from './supabase';
 import { generateCaseAnalysis, generateCaseAnalysisWithContext, extractCleanCaseName } from './gemini';
 import { CaseAnalysis } from '../types';
 
-const ECOURTS_BASE_URL = 'https://webapi.ecourtsindia.com';
 
-const getEcourtHeaders = () => {
-  const token = import.meta.env.VITE_ECOURTS_KEY;
-  if (!token) {
-    console.warn('VITE_ECOURTS_KEY is missing');
-  }
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
-  };
-};
 
 export const fetchCase = async (query: string): Promise<CaseAnalysis | null> => {
   try {
@@ -57,8 +46,13 @@ export const fetchCase = async (query: string): Promise<CaseAnalysis | null> => 
     let isGoodMatch = false;
 
     try {
-      const searchRes = await fetch(`${ECOURTS_BASE_URL}/api/partner/search?query=${encodeURIComponent(cleanCaseName)}&pageSize=3`, {
-        headers: getEcourtHeaders()
+      const searchRes = await fetch('/api/ecourts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: `/api/partner/search?query=${encodeURIComponent(cleanCaseName)}&pageSize=3`,
+          method: 'GET'
+        })
       });
       
       if (searchRes.ok) {
@@ -81,8 +75,13 @@ export const fetchCase = async (query: string): Promise<CaseAnalysis | null> => 
           if (isGoodMatch) {
             cnr = firstResult.cnr;
             // 6. Get full case details using CNR
-            const detailRes = await fetch(`${ECOURTS_BASE_URL}/api/partner/case/${cnr}`, {
-              headers: getEcourtHeaders()
+            const detailRes = await fetch('/api/ecourts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                path: `/api/partner/case/${cnr}`,
+                method: 'GET'
+              })
             });
             
             if (detailRes.ok) {
