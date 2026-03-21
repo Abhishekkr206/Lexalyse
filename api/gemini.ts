@@ -20,7 +20,8 @@ export default async function handler(req: Request) {
       });
     }
 
-    const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:streamGenerateContent?key=${apiKey}&alt=sse`;
+    // Updated to use the 2.5-flash-lite model
+    const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:streamGenerateContent?key=${apiKey}&alt=sse`;
 
     const geminiBody: any = {
       contents: payload.contents,
