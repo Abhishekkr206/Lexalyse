@@ -1,31 +1,7 @@
-import { GoogleGenAI } from "@google/genai";
-
-const originalFetch = globalThis.fetch;
-globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-  let urlStr = '';
-  if (typeof input === 'string') urlStr = input;
-  else if (input instanceof URL) urlStr = input.toString();
-  else if (input instanceof Request) urlStr = input.url;
-
-  if (urlStr.includes('generativelanguage.googleapis.com')) {
-    const urlObj = new URL(urlStr);
-    return originalFetch('/api/gemini', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        path: urlObj.pathname,
-        method: init?.method || (input instanceof Request ? input.method : 'POST'),
-        body: init?.body
-      })
-    });
-  }
-  return originalFetch(input, init);
-};
-
 // ============================================================
-// MODEL CONFIGURATION — Change only this one constant
+// MODEL CONFIGURATION
 // ============================================================
-const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+const GEMINI_MODEL = 'gemini-2.0-flash-lite';
 
 export interface FileData {
   inlineData: {
@@ -342,126 +318,38 @@ Before outputting, verify:
 - NEVER invent case law, party names, dates, or factual details.
 - NEVER use the wrong governing law based on the date.
 - Every missing critical detail MUST have a placeholder — do not skip over it.`
-
 };
 
 // ============================================================
-// AI CLIENT (singleton — avoids recreating on every call)
-// ============================================================
-let _aiClient: GoogleGenAI | null = null;
-const getAiClient = () => {
-  if (_aiClient) return _aiClient;
-  _aiClient = new GoogleGenAI({ apiKey: 'proxy_key_via_api' }); // Fake key, Vercel backend injects real one
-  return _aiClient;
-};
-
-// ============================================================
-// SIMPLE RESPONSE CACHE (saves quota on repeated queries)
+// RESPONSE CACHE
 // ============================================================
 const responseCache = new Map<string, string>();
 const getCacheKey = (...parts: string[]) => parts.join('||');
 
 // ============================================================
-// SERVICE FUNCTIONS
+// CORE STREAMING FUNCTION — all calls go through /api/gemini
 // ============================================================
-
-export const generateCaseAnalysis = async (query: string) => {
-  try {
-    const ai = getAiClient();
-    const prompt = PROMPTS.CASE_ANALYSIS.replace(/\{query\}/g, query);
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: `Search and analyze the case: ${query}`,
-      config: {
-        systemInstruction: prompt,
-        maxOutputTokens: 1500,
-      },
-    });
-
-    return response.text;
-  } catch (error: any) {
-    console.error("Case Analysis Error:", error);
-    if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
-      return JSON.stringify({
-        caseName: 'QUOTA_EXCEEDED',
-        citation: '',
-        year: '',
-        bench: '',
-        tags: [],
-        facts: 'API quota exceeded. Please wait a minute and try again.',
-        coreIssues: '',
-        arguments: '',
-        judgement: '',
-        holding: '',
-        ratioDecidendi: '',
-        status: '',
-        primarySourceUrl: ''
-      });
-    }
-    return null;
-  }
-};
-
-export const generateCaseAnalysisWithContext = async (caseName: string, ecourtContext: string) => {
-  try {
-    const ai = getAiClient();
-    const systemPrompt = PROMPTS.CASE_ANALYSIS.replace(/\{query\}/g, caseName);
-    const contents = `Here is the official eCourts record: ${ecourtContext}. Using this as ground truth, generate a complete legal analysis with facts, arguments, core issues, holding and ratio decidendi in the existing JSON format.`;
-    
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: contents,
-      config: {
-        systemInstruction: systemPrompt,
-        maxOutputTokens: 1500,
-      },
-    });
-
-    return response.text;
-  } catch (error: any) {
-    console.error("Case Analysis With Context Error:", error);
-    if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
-      return JSON.stringify({
-        caseName: 'QUOTA_EXCEEDED',
-        citation: '',
-        year: '',
-        bench: '',
-        tags: [],
-        facts: 'API quota exceeded. Please wait a minute and try again.',
-        coreIssues: '',
-        arguments: '',
-        judgement: '',
-        holding: '',
-        ratioDecidendi: '',
-        status: '',
-        primarySourceUrl: ''
-      });
-    }
-    return null;
-  }
-};
-
 const streamGeminiDirect = async (
   systemInstruction: string,
   contents: any[],
   onChunk: (text: string) => void,
   maxOutputTokens: number = 1500
-) => {
+): Promise<string> => {
   try {
     const response = await fetch('/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        systemInstruction, 
-        contents, 
+      body: JSON.stringify({
+        systemInstruction,
+        contents,
         maxOutputTokens,
-        stream: true 
+        stream: true
       })
     });
 
     if (!response.ok) {
       if (response.status === 429) {
-        const msg = "QUOTA_EXCEEDED: You've reached the API free tier limit. Please wait a minute and try again.";
+        const msg = "QUOTA_EXCEEDED: You've reached the API limit. Please wait a minute and try again.";
         onChunk(msg);
         return msg;
       }
@@ -482,24 +370,115 @@ const streamGeminiDirect = async (
       const chunk = decoder.decode(value);
       const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
       for (const line of lines) {
-        if (line.replace('data: ', '').trim() === '[DONE]') continue;
+        const raw = line.replace('data: ', '').trim();
+        if (raw === '[DONE]') continue;
         try {
-          const data = JSON.parse(line.replace('data: ', ''));
+          const data = JSON.parse(raw);
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
           fullText += text;
           onChunk(fullText);
         } catch (e) {
-          console.warn('Parse error ignored', e);
+          // ignore parse errors
         }
       }
     }
-    
+
     return fullText;
   } catch (error) {
-    console.error("Gemini Direct Stream Error:", error);
+    console.error("Gemini Stream Error:", error);
     const msg = "Unable to perform analysis. Please check your connection.";
     onChunk(msg);
     return msg;
+  }
+};
+
+// ============================================================
+// NON-STREAMING CALL — for case analysis (returns JSON)
+// ============================================================
+const callGeminiNonStream = async (
+  systemInstruction: string,
+  prompt: string,
+  maxOutputTokens: number = 1500
+): Promise<string | null> => {
+  try {
+    const response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction,
+        contents: [{ parts: [{ text: prompt }] }],
+        maxOutputTokens,
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return JSON.stringify({ caseName: 'QUOTA_EXCEEDED', facts: 'API quota exceeded.' });
+      }
+      return null;
+    }
+
+    // Non-stream response — read all chunks and combine
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+
+    const decoder = new TextDecoder();
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+      for (const line of lines) {
+        const raw = line.replace('data: ', '').trim();
+        if (raw === '[DONE]') continue;
+        try {
+          const data = JSON.parse(raw);
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          fullText += text;
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+
+    return fullText || null;
+  } catch (error) {
+    console.error("Gemini Non-Stream Error:", error);
+    return null;
+  }
+};
+
+// ============================================================
+// SERVICE FUNCTIONS
+// ============================================================
+
+export const generateCaseAnalysis = async (query: string): Promise<string | null> => {
+  const prompt = PROMPTS.CASE_ANALYSIS.replace(/\{query\}/g, query);
+  return callGeminiNonStream(prompt, `Search and analyze the case: ${query}`, 1500);
+};
+
+export const generateCaseAnalysisWithContext = async (
+  caseName: string,
+  ecourtContext: string
+): Promise<string | null> => {
+  const systemPrompt = PROMPTS.CASE_ANALYSIS.replace(/\{query\}/g, caseName);
+  const contents = `Here is the official eCourts record: ${ecourtContext}. Using this as ground truth, generate a complete legal analysis with facts, arguments, core issues, holding and ratio decidendi in the existing JSON format.`;
+  return callGeminiNonStream(systemPrompt, contents, 1500);
+};
+
+export const extractCleanCaseName = async (query: string): Promise<string> => {
+  try {
+    const result = await callGeminiNonStream(
+      '',
+      `Extract the precise, official case name from this query: "${query}". Return ONLY the clean case name and no other text.`,
+      100
+    );
+    return result?.trim() || query;
+  } catch {
+    return query;
   }
 };
 
@@ -509,12 +488,7 @@ export const generateDeepCaseAnalysisStream = async (
   onChunk: (text: string) => void
 ) => {
   const prompt = `Analyze this judgment: ${url}. Case Name: ${caseName}`;
-  return streamGeminiDirect(
-    PROMPTS.DEEP_CASE_ANALYSIS,
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    1500
-  );
+  return streamGeminiDirect(PROMPTS.DEEP_CASE_ANALYSIS, [{ parts: [{ text: prompt }] }], onChunk, 1500);
 };
 
 export const generateBareActTextStream = async (
@@ -524,10 +498,7 @@ export const generateBareActTextStream = async (
 ) => {
   const cacheKey = getCacheKey('bareact', act, section);
   const cached = responseCache.get(cacheKey);
-  if (cached) {
-    onChunk(cached);
-    return cached;
-  }
+  if (cached) { onChunk(cached); return cached; }
 
   let systemInstruction = PROMPTS.BARE_ACT;
   if (act.toLowerCase().includes("constitution")) {
@@ -536,25 +507,13 @@ export const generateBareActTextStream = async (
 
   const prompt = `Please find and provide the verbatim text of ${
     act.toLowerCase().includes("constitution") ? "Article" : "Section"
-  } ${section} of the ${act}. Use Google Search to ensure accuracy.`;
+  } ${section} of the ${act}.`;
 
-  const fullText: any = await streamGeminiDirect(
-    systemInstruction,
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    2000
-  );
+  const fullText = await streamGeminiDirect(systemInstruction, [{ parts: [{ text: prompt }] }], onChunk, 2000);
 
-  if (!fullText || typeof fullText !== 'string' || fullText.includes("STATUTORY TEXT NOT FOUND") || fullText.includes("Error:") || fullText.includes("QUOTA_EXCEEDED")) {
-    if (!fullText || fullText.includes("STATUTORY TEXT NOT FOUND")) {
-      const errorMsg = `### **${act} - ${section}**\n\n> Statutory text not found for this section. Please verify the section number or check the official [India Code](https://www.indiacode.nic.in/) portal.`;
-      onChunk(errorMsg);
-      return errorMsg;
-    }
-    return fullText;
+  if (fullText && !fullText.includes("STATUTORY TEXT NOT FOUND") && !fullText.includes("Error:")) {
+    responseCache.set(cacheKey, fullText);
   }
-
-  responseCache.set(cacheKey, fullText);
   return fullText;
 };
 
@@ -565,10 +524,7 @@ export const generateAcademicAnalysisStream = async (
 ) => {
   const cacheKey = getCacheKey('academic', act, section);
   const cached = responseCache.get(cacheKey);
-  if (cached) {
-    onChunk(cached);
-    return cached;
-  }
+  if (cached) { onChunk(cached); return cached; }
 
   let systemInstruction = PROMPTS.ACADEMIC;
   if (act.toLowerCase().includes("constitution")) {
@@ -579,14 +535,9 @@ export const generateAcademicAnalysisStream = async (
     act.toLowerCase().includes("constitution") ? "Article" : "Section"
   } ${section} of the ${act}.`;
 
-  const fullText: any = await streamGeminiDirect(
-    systemInstruction,
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    1000
-  );
+  const fullText = await streamGeminiDirect(systemInstruction, [{ parts: [{ text: prompt }] }], onChunk, 1000);
 
-  if (typeof fullText === 'string' && !fullText.includes("Error:") && !fullText.includes("QUOTA_EXCEEDED")) {
+  if (fullText && !fullText.includes("Error:")) {
     responseCache.set(cacheKey, fullText);
   }
   return fullText;
@@ -597,16 +548,8 @@ export const generateMootAnalysisStream = async (
   argument: string,
   onChunk: (text: string) => void
 ) => {
-  const prompt = PROMPTS.MOOT
-    .replace("{side}", side)
-    .replace("{argument}", argument);
-
-  return streamGeminiDirect(
-    "",
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    1500
-  );
+  const prompt = PROMPTS.MOOT.replace("{side}", side).replace("{argument}", argument);
+  return streamGeminiDirect("", [{ parts: [{ text: prompt }] }], onChunk, 1500);
 };
 
 export const generateStatutoryConversionStream = async (
@@ -616,23 +559,12 @@ export const generateStatutoryConversionStream = async (
 ) => {
   const cacheKey = getCacheKey('bridge', type, section);
   const cached = responseCache.get(cacheKey);
-  if (cached) {
-    onChunk(cached);
-    return cached;
-  }
+  if (cached) { onChunk(cached); return cached; }
 
-  const prompt = PROMPTS.BRIDGE
-    .replace("{type}", type)
-    .replace("{section}", section);
+  const prompt = PROMPTS.BRIDGE.replace("{type}", type).replace("{section}", section);
+  const fullText = await streamGeminiDirect("", [{ parts: [{ text: prompt }] }], onChunk, 400);
 
-  const fullText: any = await streamGeminiDirect(
-    "",
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    400
-  );
-
-  if (typeof fullText === 'string' && !fullText.includes("Error:") && !fullText.includes("QUOTA_EXCEEDED")) {
+  if (fullText && !fullText.includes("Error:")) {
     responseCache.set(cacheKey, fullText);
   }
   return fullText;
@@ -652,22 +584,11 @@ export const generateResearchResponseStream = async (
 
   const newParts: any[] = [{ text: newMessage }];
   if (files && files.length > 0) {
-    files.forEach((file) => {
-      newParts.push(file);
-    });
+    files.forEach((file) => newParts.push(file));
   }
+  contents.push({ role: "user", parts: newParts });
 
-  contents.push({
-    role: "user",
-    parts: newParts,
-  });
-
-  return streamGeminiDirect(
-    PROMPTS.RESEARCH,
-    contents,
-    onChunk,
-    1200
-  );
+  return streamGeminiDirect(PROMPTS.RESEARCH, contents, onChunk, 1200);
 };
 
 export const generateMaximExplanationStream = async (
@@ -675,13 +596,7 @@ export const generateMaximExplanationStream = async (
   onChunk: (text: string) => void
 ) => {
   const prompt = PROMPTS.MAXIMS.replace(/{maxim}/g, maxim);
-
-  return streamGeminiDirect(
-    "",
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    400
-  );
+  return streamGeminiDirect("", [{ parts: [{ text: prompt }] }], onChunk, 400);
 };
 
 export const generateDoctrineExplanationStream = async (
@@ -689,13 +604,7 @@ export const generateDoctrineExplanationStream = async (
   onChunk: (text: string) => void
 ) => {
   const prompt = PROMPTS.DOCTRINES.replace("{doctrine}", doctrine);
-
-  return streamGeminiDirect(
-    "",
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    250
-  );
+  return streamGeminiDirect("", [{ parts: [{ text: prompt }] }], onChunk, 250);
 };
 
 export const generateDraftStream = async (
@@ -703,35 +612,6 @@ export const generateDraftStream = async (
   details: string,
   onChunk: (text: string) => void
 ) => {
-  const prompt = PROMPTS.DRAFTING
-    .replace("{documentType}", documentType)
-    .replace("{details}", details);
-
-  return streamGeminiDirect(
-    "",
-    [{ parts: [{ text: prompt }] }],
-    onChunk,
-    1500
-  );
-};
-
-export const extractCleanCaseName = async (query: string): Promise<string> => {
-  try {
-    const ai = getAiClient();
-    const prompt = `Extract the precise, official case name from this query: "${query}". If it's a citation, search for the case name. Return ONLY the clean case name and no other text, punctuation, or explanation.`;
-
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        maxOutputTokens: 100,
-      },
-    });
-
-    return response.text?.trim() || query;
-  } catch (error) {
-    console.error('Extract Clean Case Name Error:', error);
-    return query; // Fallback to original query
-  }
+  const prompt = PROMPTS.DRAFTING.replace("{documentType}", documentType).replace("{details}", details);
+  return streamGeminiDirect("", [{ parts: [{ text: prompt }] }], onChunk, 1500);
 };
