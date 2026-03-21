@@ -441,48 +441,80 @@ export const generateCaseAnalysisWithContext = async (caseName: string, ecourtCo
   }
 };
 
+const streamGeminiDirect = async (
+  systemInstruction: string,
+  contents: any[],
+  onChunk: (text: string) => void,
+  maxOutputTokens: number = 1500
+) => {
+  try {
+    const response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        systemInstruction, 
+        contents, 
+        maxOutputTokens,
+        stream: true 
+      })
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        const msg = "QUOTA_EXCEEDED: You've reached the API free tier limit. Please wait a minute and try again.";
+        onChunk(msg);
+        return msg;
+      }
+      const msg = "Error generating content. Please check your connection.";
+      onChunk(msg);
+      return msg;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("No reader available");
+
+    const decoder = new TextDecoder();
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n').filter(line => line.startsWith('data: '));
+      for (const line of lines) {
+        if (line.replace('data: ', '').trim() === '[DONE]') continue;
+        try {
+          const data = JSON.parse(line.replace('data: ', ''));
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          fullText += text;
+          onChunk(fullText);
+        } catch (e) {
+          console.warn('Parse error ignored', e);
+        }
+      }
+    }
+    
+    return fullText;
+  } catch (error) {
+    console.error("Gemini Direct Stream Error:", error);
+    const msg = "Unable to perform analysis. Please check your connection.";
+    onChunk(msg);
+    return msg;
+  }
+};
+
 export const generateDeepCaseAnalysisStream = async (
   url: string,
   caseName: string,
   onChunk: (text: string) => void
 ) => {
-  try {
-    const ai = getAiClient();
-    const prompt = `Analyze this judgment: ${url}. Case Name: ${caseName}`;
-
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction: PROMPTS.DEEP_CASE_ANALYSIS,
-        maxOutputTokens: 1500,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    return fullText;
-  } catch (error: any) {
-    console.error("Deep Case Analysis Stream Error:", error);
-    if (
-      error?.status === 429 ||
-      error?.message?.includes('429') ||
-      error?.message?.includes('RESOURCE_EXHAUSTED')
-    ) {
-      const errorMsg =
-        "QUOTA_EXCEEDED: You've reached the API free tier limit. Please wait a minute and try again.";
-      onChunk(errorMsg);
-      return errorMsg;
-    }
-    const errorMsg =
-      "Unable to perform deep analysis. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
-  }
+  const prompt = `Analyze this judgment: ${url}. Case Name: ${caseName}`;
+  return streamGeminiDirect(
+    PROMPTS.DEEP_CASE_ANALYSIS,
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    1500
+  );
 };
 
 export const generateBareActTextStream = async (
@@ -497,47 +529,33 @@ export const generateBareActTextStream = async (
     return cached;
   }
 
-  try {
-    const ai = getAiClient();
-    let systemInstruction = PROMPTS.BARE_ACT;
+  let systemInstruction = PROMPTS.BARE_ACT;
+  if (act.toLowerCase().includes("constitution")) {
+    systemInstruction = systemInstruction.replace(/Section/g, "Article");
+  }
 
-    if (act.toLowerCase().includes("constitution")) {
-      systemInstruction = systemInstruction.replace(/Section/g, "Article");
-    }
+  const prompt = `Please find and provide the verbatim text of ${
+    act.toLowerCase().includes("constitution") ? "Article" : "Section"
+  } ${section} of the ${act}. Use Google Search to ensure accuracy.`;
 
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: `Please find and provide the verbatim text of ${
-        act.toLowerCase().includes("constitution") ? "Article" : "Section"
-      } ${section} of the ${act}. Use Google Search to ensure accuracy.`,
-      config: {
-        systemInstruction,
-        maxOutputTokens: 2000,
-      },
-    });
+  const fullText: any = await streamGeminiDirect(
+    systemInstruction,
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    2000
+  );
 
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-
+  if (!fullText || typeof fullText !== 'string' || fullText.includes("STATUTORY TEXT NOT FOUND") || fullText.includes("Error:") || fullText.includes("QUOTA_EXCEEDED")) {
     if (!fullText || fullText.includes("STATUTORY TEXT NOT FOUND")) {
       const errorMsg = `### **${act} - ${section}**\n\n> Statutory text not found for this section. Please verify the section number or check the official [India Code](https://www.indiacode.nic.in/) portal.`;
       onChunk(errorMsg);
       return errorMsg;
     }
-
-    responseCache.set(cacheKey, fullText);
     return fullText;
-  } catch (error) {
-    console.error("Bare Act Text Stream Error:", error);
-    const errorMsg =
-      "Unable to fetch original text. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
   }
+
+  responseCache.set(cacheKey, fullText);
+  return fullText;
 };
 
 export const generateAcademicAnalysisStream = async (
@@ -552,41 +570,26 @@ export const generateAcademicAnalysisStream = async (
     return cached;
   }
 
-  try {
-    const ai = getAiClient();
-    let systemInstruction = PROMPTS.ACADEMIC;
-
-    if (act.toLowerCase().includes("constitution")) {
-      systemInstruction = systemInstruction.replace(/Section/g, "Article");
-    }
-
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: `Please provide an academic analysis of ${
-        act.toLowerCase().includes("constitution") ? "Article" : "Section"
-      } ${section} of the ${act}.`,
-      config: {
-        systemInstruction,
-        tools: [{ googleSearch: {} }],
-        maxOutputTokens: 1000,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    responseCache.set(cacheKey, fullText);
-    return fullText;
-  } catch (error) {
-    console.error("Academic Analysis Stream Error:", error);
-    const errorMsg =
-      "Unable to generate analysis. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
+  let systemInstruction = PROMPTS.ACADEMIC;
+  if (act.toLowerCase().includes("constitution")) {
+    systemInstruction = systemInstruction.replace(/Section/g, "Article");
   }
+
+  const prompt = `Please provide an academic analysis of ${
+    act.toLowerCase().includes("constitution") ? "Article" : "Section"
+  } ${section} of the ${act}.`;
+
+  const fullText: any = await streamGeminiDirect(
+    systemInstruction,
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    1000
+  );
+
+  if (typeof fullText === 'string' && !fullText.includes("Error:") && !fullText.includes("QUOTA_EXCEEDED")) {
+    responseCache.set(cacheKey, fullText);
+  }
+  return fullText;
 };
 
 export const generateMootAnalysisStream = async (
@@ -594,34 +597,16 @@ export const generateMootAnalysisStream = async (
   argument: string,
   onChunk: (text: string) => void
 ) => {
-  try {
-    const ai = getAiClient();
-    const prompt = PROMPTS.MOOT
-      .replace("{side}", side)
-      .replace("{argument}", argument);
+  const prompt = PROMPTS.MOOT
+    .replace("{side}", side)
+    .replace("{argument}", argument);
 
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        maxOutputTokens: 1500,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    return fullText;
-  } catch (error) {
-    console.error("Moot Analysis Stream Error:", error);
-    const errorMsg =
-      "Unable to analyze argument. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
-  }
+  return streamGeminiDirect(
+    "",
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    1500
+  );
 };
 
 export const generateStatutoryConversionStream = async (
@@ -636,35 +621,21 @@ export const generateStatutoryConversionStream = async (
     return cached;
   }
 
-  try {
-    const ai = getAiClient();
-    const prompt = PROMPTS.BRIDGE
-      .replace("{type}", type)
-      .replace("{section}", section);
+  const prompt = PROMPTS.BRIDGE
+    .replace("{type}", type)
+    .replace("{section}", section);
 
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        maxOutputTokens: 400,
-      },
-    });
+  const fullText: any = await streamGeminiDirect(
+    "",
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    400
+  );
 
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
+  if (typeof fullText === 'string' && !fullText.includes("Error:") && !fullText.includes("QUOTA_EXCEEDED")) {
     responseCache.set(cacheKey, fullText);
-    return fullText;
-  } catch (error) {
-    console.error("Statutory Bridge Stream Error:", error);
-    const errorMsg =
-      "Unable to convert section. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
   }
+  return fullText;
 };
 
 export const generateResearchResponseStream = async (
@@ -673,114 +644,58 @@ export const generateResearchResponseStream = async (
   onChunk: (text: string) => void,
   files?: FileData[]
 ) => {
-  try {
-    const ai = getAiClient();
+  const recentHistory = history.slice(-6);
+  const contents = recentHistory.map((h) => ({
+    role: h.role === 'model' ? 'model' : 'user',
+    parts: [{ text: h.text }],
+  }));
 
-    // Cap history to last 6 messages to avoid ballooning input tokens
-    const recentHistory = history.slice(-6);
-    const contents = recentHistory.map((h) => ({
-      role: h.role,
-      parts: [{ text: h.text }],
-    }));
-
-    const newParts: any[] = [{ text: newMessage }];
-    if (files && files.length > 0) {
-      files.forEach((file) => {
-        newParts.push(file);
-      });
-    }
-
-    contents.push({
-      role: "user",
-      parts: newParts,
+  const newParts: any[] = [{ text: newMessage }];
+  if (files && files.length > 0) {
+    files.forEach((file) => {
+      newParts.push(file);
     });
-
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents,
-      config: {
-        systemInstruction: PROMPTS.RESEARCH,
-        maxOutputTokens: 1200,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    return fullText;
-  } catch (error) {
-    console.error("Research AI Stream Error:", error);
-    const errorMsg = "I encountered an error. Please try again.";
-    onChunk(errorMsg);
-    return errorMsg;
   }
+
+  contents.push({
+    role: "user",
+    parts: newParts,
+  });
+
+  return streamGeminiDirect(
+    PROMPTS.RESEARCH,
+    contents,
+    onChunk,
+    1200
+  );
 };
 
 export const generateMaximExplanationStream = async (
   maxim: string,
   onChunk: (text: string) => void
 ) => {
-  try {
-    const ai = getAiClient();
-    const prompt = PROMPTS.MAXIMS.replace(/{maxim}/g, maxim);
+  const prompt = PROMPTS.MAXIMS.replace(/{maxim}/g, maxim);
 
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        maxOutputTokens: 400,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    return fullText;
-  } catch (error) {
-    console.error("Maxim Explanation Stream Error:", error);
-    const errorMsg =
-      "Unable to explain maxim. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
-  }
+  return streamGeminiDirect(
+    "",
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    400
+  );
 };
 
 export const generateDoctrineExplanationStream = async (
   doctrine: string,
   onChunk: (text: string) => void
 ) => {
-  try {
-    const ai = getAiClient();
-    const prompt = PROMPTS.DOCTRINES.replace("{doctrine}", doctrine);
+  const prompt = PROMPTS.DOCTRINES.replace("{doctrine}", doctrine);
 
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        maxOutputTokens: 250,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    return fullText;
-  } catch (error) {
-    console.error("Doctrine Explanation Stream Error:", error);
-    const errorMsg =
-      "Unable to explain doctrine. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
-  }
+  return streamGeminiDirect(
+    "",
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    250
+  );
 };
 
 export const generateDraftStream = async (
@@ -788,34 +703,16 @@ export const generateDraftStream = async (
   details: string,
   onChunk: (text: string) => void
 ) => {
-  try {
-    const ai = getAiClient();
-    const prompt = PROMPTS.DRAFTING
-      .replace("{documentType}", documentType)
-      .replace("{details}", details);
+  const prompt = PROMPTS.DRAFTING
+    .replace("{documentType}", documentType)
+    .replace("{details}", details);
 
-    const response = await ai.models.generateContentStream({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        maxOutputTokens: 1500,
-      },
-    });
-
-    let fullText = "";
-    for await (const chunk of response) {
-      const text = chunk.text || "";
-      fullText += text;
-      onChunk(fullText);
-    }
-    return fullText;
-  } catch (error) {
-    console.error("Drafting Stream Error:", error);
-    const errorMsg =
-      "Unable to generate draft. Please check your API key and connection.";
-    onChunk(errorMsg);
-    return errorMsg;
-  }
+  return streamGeminiDirect(
+    "",
+    [{ parts: [{ text: prompt }] }],
+    onChunk,
+    1500
+  );
 };
 
 export const extractCleanCaseName = async (query: string): Promise<string> => {
