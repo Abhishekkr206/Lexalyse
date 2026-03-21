@@ -14,6 +14,7 @@ export interface ChatMessage {
 
 export interface CaseAnalysis {
   caseName: string;
+  cnr?: string;
   citation: string;
   year: string;
   bench: string;

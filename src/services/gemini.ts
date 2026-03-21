@@ -385,6 +385,45 @@ export const generateCaseAnalysis = async (query: string) => {
   }
 };
 
+export const generateCaseAnalysisWithContext = async (caseName: string, ecourtContext: string) => {
+  try {
+    const ai = getAiClient();
+    const systemPrompt = PROMPTS.CASE_ANALYSIS.replace(/\{query\}/g, caseName);
+    const contents = `Here is the official eCourts record: ${ecourtContext}. Using this as ground truth, generate a complete legal analysis with facts, arguments, core issues, holding and ratio decidendi in the existing JSON format.`;
+    
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: contents,
+      config: {
+        systemInstruction: systemPrompt,
+        maxOutputTokens: 1500,
+      },
+    });
+
+    return response.text;
+  } catch (error: any) {
+    console.error("Case Analysis With Context Error:", error);
+    if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
+      return JSON.stringify({
+        caseName: 'QUOTA_EXCEEDED',
+        citation: '',
+        year: '',
+        bench: '',
+        tags: [],
+        facts: 'API quota exceeded. Please wait a minute and try again.',
+        coreIssues: '',
+        arguments: '',
+        judgement: '',
+        holding: '',
+        ratioDecidendi: '',
+        status: '',
+        primarySourceUrl: ''
+      });
+    }
+    return null;
+  }
+};
+
 export const generateDeepCaseAnalysisStream = async (
   url: string,
   caseName: string,
@@ -759,5 +798,26 @@ export const generateDraftStream = async (
       "Unable to generate draft. Please check your API key and connection.";
     onChunk(errorMsg);
     return errorMsg;
+  }
+};
+
+export const extractCleanCaseName = async (query: string): Promise<string> => {
+  try {
+    const ai = getAiClient();
+    const prompt = `Extract the precise, official case name from this query: "${query}". If it's a citation, search for the case name. Return ONLY the clean case name and no other text, punctuation, or explanation.`;
+
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+        maxOutputTokens: 100,
+      },
+    });
+
+    return response.text?.trim() || query;
+  } catch (error) {
+    console.error('Extract Clean Case Name Error:', error);
+    return query; // Fallback to original query
   }
 };

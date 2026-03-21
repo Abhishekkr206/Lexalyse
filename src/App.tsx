@@ -15,6 +15,7 @@ import {
   generateDoctrineExplanationStream, 
   generateDraftStream
 } from './services/gemini';
+import { fetchCase } from './services/ecourt';
 import LandingPage from './components/LandingPage';
 
 import { Sidebar } from './components/layout/Sidebar';
@@ -269,36 +270,15 @@ const LexalyseApp = () => {
     setCaseResult(null);
     
     try {
-      const result = await generateCaseAnalysis(repoSearch);
-      if (result) {
-        try {
-          const cleanJson = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-          
-          // Gemini returned plain text instead of JSON
-          if (!cleanJson.startsWith('{')) {
-            toast.error('Case Not Found', {
-              description: 'Could not find this case. Try searching with the full case name or citation (e.g., "Kesavananda Bharati").',
-              duration: 5000,
-            });
-            setIsRepoLoading(false);
-            return;
-          }
-
-          const parsed = JSON.parse(cleanJson);
-          if (parsed.caseName === 'QUOTA_EXCEEDED') {
-            toast.error('AI Requests Exhausted', {
-              description: 'You\'ve used up your free AI requests for now. Wait a few minutes and try again.',
-              duration: 6000,
-            });
-          } else {
-            setCaseResult(parsed);
-          }
-        } catch (e) {
-          console.error("Failed to parse case analysis JSON", e);
-          toast.error('Case Not Found', {
-            description: 'Could not find this case. Try searching with the full case name or citation.',
-            duration: 5000,
+      const parsed = await fetchCase(repoSearch);
+      if (parsed) {
+        if (parsed.caseName === 'QUOTA_EXCEEDED') {
+          toast.error('AI Requests Exhausted', {
+            description: 'You\'ve used up your free AI requests for now. Wait a few minutes and try again.',
+            duration: 6000,
           });
+        } else {
+          setCaseResult(parsed);
         }
       } else {
         toast.error('No Results Found', {

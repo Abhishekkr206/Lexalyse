@@ -164,6 +164,16 @@ export const Repository: React.FC<RepositoryProps> = ({
                   "{caseResult.ratioDecidendi}"
                 </p>
               </div>
+              {caseResult.cnr && (
+                <a 
+                  href={`https://ecourtsindia.com/cnr/${caseResult.cnr}`}
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="mt-4 flex items-center justify-center gap-2 w-full px-4 py-3 bg-card border border-border hover:border-primary/50 text-foreground text-sm font-bold rounded-xl transition-all shadow-sm"
+                >
+                  <Gavel size={16} /> View on eCourts
+                </a>
+              )}
             </div>
           </div>
         </div>
