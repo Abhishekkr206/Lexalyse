@@ -157,6 +157,13 @@ export const fetchCase = async (query: string): Promise<CaseAnalysis | null> => 
       cnr: cnr // Include CNR from eCourts if found
     };
 
+    if (!finalCaseAnalysis.caseName || 
+        finalCaseAnalysis.caseName === 'Not Found' ||
+        finalCaseAnalysis.facts === 'Not Found' ||
+        !finalCaseAnalysis.facts) {
+      return null; // Don't save garbage data
+    }
+
     // 7. Save to Supabase
     try {
       await supabase.from('cases').insert({
